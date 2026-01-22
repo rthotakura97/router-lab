@@ -6,37 +6,34 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use tracing::{debug, info};
 
-async fn handle_request(
-    req: Request<hyper::body::Incoming>,
-    port: u16,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    let response_body = format!(
-        "Backend on port {}\nMethod: {}\nPath: {}\n",
-        port,
-        req.method(),
-        req.uri().path(),
-    );
-
-    Ok(Response::new(Full::new(Bytes::from(response_body))))
-}
-
-pub async fn run_backend(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn create_backend(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(addr).await?;
 
-    println!("Backend listening on http://{}", addr);
+    info!("Backend listening on http://{}", addr);
 
     loop {
         let (stream, _) = listener.accept().await?;
         let io = TokioIo::new(stream);
 
         tokio::spawn(async move {
+            let handler = service_fn(move |req: Request<hyper::body::Incoming>| async move {
+                let response_body = format!(
+                    "Backend on port {}\nMethod: {}\nPath: {}\n",
+                    port,
+                    req.method(),
+                    req.uri().path(),
+                );
+                Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::from(response_body))))
+            });
+
             if let Err(err) = http1::Builder::new()
-                .serve_connection(io, service_fn(|req| handle_request(req, port)))
+                .serve_connection(io, handler)
                 .await
             {
-                eprintln!("Backend {} error: {:?}", port, err);
+                debug!("Backend {} error: {:?}", port, err);
             }
         });
     }
