@@ -57,25 +57,21 @@ async fn handle_proxy_request(
 ) -> Result<Response<hyper::body::Incoming>, Box<dyn std::error::Error + Send + Sync>> {
     let start = Instant::now();
 
-    // Select backend
     let backend_port = {
         let mut lb = lb.lock().await;
         lb.select_backend()
     };
 
-    // Record the request
     {
         let mut m = metrics.lock().await;
         m.record_request(backend_port);
     }
 
-    // Connect to backend
     let host = "127.0.0.1";
     let backend_addr = format!("{}:{}", host, backend_port);
     let stream = tokio::net::TcpStream::connect(&backend_addr).await?;
     let io = TokioIo::new(stream);
 
-    // Build request to backend
     let path = req.uri().path();
     let backend_uri = format!("http://{}{}", backend_addr, path);
 
@@ -84,17 +80,14 @@ async fn handle_proxy_request(
         .method(req.method())
         .body(Empty::<Bytes>::new())?;
 
-    // Send request and get response
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
 
-    // Spawn connection driver
     tokio::spawn(async move {
         if let Err(err) = conn.await {
             debug!("Connection error: {:?}", err);
         }
     });
 
-    // Send request
     let response = sender.send_request(backend_req).await?;
 
     let latency = start.elapsed();
@@ -103,6 +96,12 @@ async fn handle_proxy_request(
         latency_us = latency.as_micros(),
         "Request completed"
     );
+
+    // TODO: If any ? above returns early, on_request_complete won't be called (counter leak)
+    {
+        let mut lb = lb.lock().await;
+        lb.on_request_complete(backend_port);
+    }
 
     Ok(response)
 }

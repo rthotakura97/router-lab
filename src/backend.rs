@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
-pub async fn create_backend(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn create_backend(port: u16, latency_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(addr).await?;
 
@@ -20,6 +20,7 @@ pub async fn create_backend(port: u16) -> Result<(), Box<dyn std::error::Error>>
 
         tokio::spawn(async move {
             let handler = service_fn(move |req: Request<hyper::body::Incoming>| async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(latency_ms)).await;
                 let response_body = format!(
                     "Backend on port {}\nMethod: {}\nPath: {}\n",
                     port,
